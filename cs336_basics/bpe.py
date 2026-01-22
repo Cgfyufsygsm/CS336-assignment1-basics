@@ -1,40 +1,106 @@
+import heapq
 import os
 
 from cs336_basics.pretokenization import pretokenize
 
-def get_pair_counts(word_tokens: dict[tuple[bytes, ...], int]) -> dict[tuple[bytes, bytes], int]:
-    """
-    Given a dictionary mapping word token sequences to counts,
-    return a dictionary mapping adjacent token pairs to their counts.
-    """
-    pair_counts = {}
-    for token_seq, count in word_tokens.items():
-        for i in range(len(token_seq) - 1):
-            pair = (token_seq[i], token_seq[i + 1])
-            pair_counts[pair] = pair_counts.get(pair, 0) + count
-    return pair_counts
+def _iter_pairs(token_seq: tuple[bytes, ...]):
+    for i in range(len(token_seq) - 1):
+        yield (token_seq[i], token_seq[i + 1])
 
-def merge_pair_in_token_seq(token_seq: tuple[bytes, ...], pair_to_merge: tuple[bytes, bytes]) -> tuple[bytes, ...]:
-    """
-    Given a token sequence and a pair of tokens to merge,
-    return a new token sequence with all occurrences of the pair merged.
-    """
+def _merge_pair_in_token_seq(
+    token_seq: tuple[bytes, ...], pair_to_merge: tuple[bytes, bytes]
+) -> tuple[tuple[bytes, ...], bool]:
     merged_token = pair_to_merge[0] + pair_to_merge[1]
     new_token_seq = []
     i = 0
+    changed = False
     while i < len(token_seq):
         if i < len(token_seq) - 1 and (token_seq[i], token_seq[i + 1]) == pair_to_merge:
             new_token_seq.append(merged_token)
             i += 2
+            changed = True
         else:
             new_token_seq.append(token_seq[i])
             i += 1
-    return tuple(new_token_seq)
+    if not changed:
+        return token_seq, False
+    return tuple(new_token_seq), True
+
+def _update_counts_for_seq(
+    pair_counts: dict[tuple[bytes, bytes], int],
+    heap: list[tuple[int, tuple[bytes, bytes]]],
+    token_seq: tuple[bytes, ...],
+    count: int,
+    delta: int,
+) -> None:
+    scale = delta * count
+    for pair in _iter_pairs(token_seq):
+        new_count = pair_counts.get(pair, 0) + scale
+        if new_count:
+            pair_counts[pair] = new_count
+            heapq.heappush(heap, (-new_count, pair))
+        else:
+            pair_counts.pop(pair, None)
+
+def _add_seq_to_index(
+    pair_to_words: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]],
+    token_seq: tuple[bytes, ...],
+) -> None:
+    for pair in _iter_pairs(token_seq):
+        pair_to_words.setdefault(pair, set()).add(token_seq)
+
+def _remove_seq_from_index(
+    pair_to_words: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]],
+    token_seq: tuple[bytes, ...],
+) -> None:
+    for pair in _iter_pairs(token_seq):
+        words = pair_to_words.get(pair)
+        if words is None:
+            continue
+        words.discard(token_seq)
+        if not words:
+            pair_to_words.pop(pair, None)
+
+def _init_pair_state(word_tokens: dict[tuple[bytes, ...], int]):
+    pair_counts: dict[tuple[bytes, bytes], int] = {}
+    pair_to_words: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]] = {}
+    for token_seq, count in word_tokens.items():
+        for pair in _iter_pairs(token_seq):
+            pair_counts[pair] = pair_counts.get(pair, 0) + count
+            pair_to_words.setdefault(pair, set()).add(token_seq)
+    heap = [(-count, pair) for pair, count in pair_counts.items()]
+    heapq.heapify(heap)
+    return pair_counts, pair_to_words, heap
+
+def _next_best_pair(
+    pair_counts: dict[tuple[bytes, bytes], int],
+    heap: list[tuple[int, tuple[bytes, bytes]]],
+):
+    while heap:
+        neg_count, pair = heapq.heappop(heap)
+        count = pair_counts.get(pair, 0)
+        if count == 0 or -neg_count != count:
+            continue
+        # Resolve ties by lexicographically largest pair.
+        candidates = [pair]
+        while heap and heap[0][0] == neg_count:
+            _, pair = heapq.heappop(heap)
+            count = pair_counts.get(pair, 0)
+            if count == 0 or -neg_count != count:
+                continue
+            candidates.append(pair)
+        best_pair = max(candidates)
+        for pair in candidates:
+            if pair != best_pair:
+                heapq.heappush(heap, (neg_count, pair))
+        return best_pair, -neg_count
+    return None, 0
 
 def train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
-    special_tokens: list[str]) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+    special_tokens: list[str],
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """
     Train a BPE tokenizer on the given input file.
 
@@ -77,16 +143,34 @@ def train_bpe(
         vocab[next_id] = bytes([b])
         next_id += 1
     
+    pair_counts, pair_to_words, heap = _init_pair_state(word_tokens)
     while len(vocab) < vocab_size:
-        pair_counts = get_pair_counts(word_tokens)
-        best_pair = max(pair_counts, key=lambda p: (pair_counts[p], p))
+        best_pair, _ = _next_best_pair(pair_counts, heap)
+        if best_pair is None:
+            break
         vocab[next_id] = best_pair[0] + best_pair[1]
         next_id += 1
         merges.append(best_pair)
-        word_tokens = {
-            merge_pair_in_token_seq(token_seq, best_pair): count
-            for token_seq, count in word_tokens.items()
-        }
+
+        impacted_words = list(pair_to_words.get(best_pair, ()))
+        if not impacted_words:
+            break
+        new_word_counts: dict[tuple[bytes, ...], int] = {}
+        for token_seq in impacted_words:
+            count = word_tokens.pop(token_seq, None)
+            if count is None:
+                continue
+            new_seq, changed = _merge_pair_in_token_seq(token_seq, best_pair)
+            if not changed:
+                word_tokens[token_seq] = count
+                continue
+            _update_counts_for_seq(pair_counts, heap, token_seq, count, -1)
+            _remove_seq_from_index(pair_to_words, token_seq)
+            new_word_counts[new_seq] = new_word_counts.get(new_seq, 0) + count
+        for new_seq, count in new_word_counts.items():
+            _update_counts_for_seq(pair_counts, heap, new_seq, count, 1)
+            _add_seq_to_index(pair_to_words, new_seq)
+            word_tokens[new_seq] = word_tokens.get(new_seq, 0) + count
 
     return vocab, merges
 
