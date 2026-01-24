@@ -125,7 +125,13 @@ def train_bpe(
     """
     print("Step 1/3: Pretokenizing input file...")
     pre_tokens = pretokenize(input_path, special_tokens)
+
+    total_pretokens = sum(pre_tokens.values())
     print(f"✓ Found {len(pre_tokens)} unique pretokens")
+    print(f"✓ Total pretoken occurrences: {total_pretokens:,}")
+    print(f"✓ Top 10 most common pretokens:")
+    for i, (token, count) in enumerate(pre_tokens.most_common(10), 1):
+        print(f"   {i:2d}. {repr(token):20s} → {count:,} times")
 
     print("\nStep 2/3: Initializing vocabulary...")
     merges = []
