@@ -1,6 +1,7 @@
 import heapq
 import os
 
+from tqdm import tqdm
 from cs336_basics.pretokenization import pretokenize
 
 def _iter_pairs(token_seq: tuple[bytes, ...]):
@@ -122,9 +123,13 @@ def train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
+    print("Step 1/3: Pretokenizing input file...")
     pre_tokens = pretokenize(input_path, special_tokens)
+    print(f"✓ Found {len(pre_tokens)} unique pretokens")
+
+    print("\nStep 2/3: Initializing vocabulary...")
     merges = []
-    
+
     word_tokens = {}
     for pretoken, count in pre_tokens.items():
         token_seq = tuple(bytes([b]) for b in pretoken.encode("utf-8"))
@@ -137,13 +142,20 @@ def train_bpe(
     for special_token in special_tokens:
         vocab[next_id] = special_token.encode("utf-8")
         next_id += 1
-    
+
     # add single byte tokens to vocab
     for b in range(256):
         vocab[next_id] = bytes([b])
         next_id += 1
-    
+
+    print(f"✓ Initial vocabulary size: {len(vocab)} (special tokens + 256 bytes)")
+
+    print(f"\nStep 3/3: Learning BPE merges (target vocab size: {vocab_size})...")
     pair_counts, pair_to_words, heap = _init_pair_state(word_tokens)
+
+    num_merges_needed = vocab_size - len(vocab)
+    pbar = tqdm(total=num_merges_needed, desc="BPE merges", unit="merge")
+
     while len(vocab) < vocab_size:
         best_pair, _ = _next_best_pair(pair_counts, heap)
         if best_pair is None:
@@ -171,6 +183,11 @@ def train_bpe(
             _update_counts_for_seq(pair_counts, heap, new_seq, count, 1)
             _add_seq_to_index(pair_to_words, new_seq)
             word_tokens[new_seq] = word_tokens.get(new_seq, 0) + count
+
+        pbar.update(1)
+
+    pbar.close()
+    print(f"✓ BPE training complete! Final vocabulary size: {len(vocab)}")
 
     return vocab, merges
 

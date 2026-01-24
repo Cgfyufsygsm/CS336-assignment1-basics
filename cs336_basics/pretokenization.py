@@ -3,6 +3,7 @@ import regex as re
 from collections import Counter
 from multiprocessing import Pool
 from typing import BinaryIO
+from tqdm import tqdm
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
@@ -70,28 +71,34 @@ def process_chunk(args):
 
 def pretokenize(path: str | os.PathLike,
                 special_tokens: list[str],
-                num_processes=4
+                num_processes=None
 ) -> Counter:
     """
     Pre-tokenize the file at `path` using multiple processes.
     Returns a Counter of pre-token frequencies.
     """
+    if num_processes is None:
+        num_processes = os.cpu_count() or 4
+
+    # Create more chunks than processes for better load balancing
+    desired_chunks = num_processes * 8
+
     with open(path, "rb") as f:
-        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
-    
+        boundaries = find_chunk_boundaries(f, desired_chunks, b"<|endoftext|>")
+
     tasks = []
 
     for start, end in zip(boundaries[:-1], boundaries[1:]):
         tasks.append((path, start, end, special_tokens))
-    
+
+    print(f"  Processing {len(tasks)} chunks with {num_processes} workers...")
     with Pool(processes=num_processes) as pool:
-        results = pool.map(process_chunk, tasks)
-        # Combine results from all chunks
+        results = list(tqdm(pool.imap(process_chunk, tasks), total=len(tasks), desc="  Chunks", unit="chunk"))
 
     total_counts = Counter()
     for counter in results:
         total_counts.update(counter)
-    
+
     return total_counts
 
 ## Usage
