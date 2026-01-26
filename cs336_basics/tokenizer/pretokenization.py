@@ -1,4 +1,5 @@
 """Pretokenization for BPE training with multiprocessing support."""
+import functools
 import os
 import regex as re
 from collections import Counter
@@ -7,7 +8,9 @@ from typing import BinaryIO
 
 from cs336_basics.utils import get_logger, timer, ProgressBar
 
+# Pre-compile regex pattern for performance
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+PREPATTERN = re.compile(PAT)
 BYTES_LOOKUP = [bytes([i]) for i in range(256)]
 
 logger = get_logger(__name__)
@@ -55,32 +58,34 @@ def find_chunk_boundaries(
 
 
 def _pretokenize_text(text: str) -> Counter[tuple[bytes, ...]]:
-    """Pretokenize a single text, returning Counter of byte tuples."""
-    counter: Counter[tuple[bytes, ...]] = Counter()
-    for m in re.finditer(PAT, text):
-        raw_bytes = m.group().encode()
-        token_tuple = tuple(BYTES_LOOKUP[b] for b in raw_bytes)
-        counter[token_tuple] += 1
-    return counter
+    """Pretokenize a single text using generator chain for efficiency."""
+    # Generator chain: regex match -> encode -> byte tuple
+    raw_bytes_gen = (m.group().encode() for m in re.finditer(PREPATTERN, text))
+    pretoken_gen = (tuple(BYTES_LOOKUP[b] for b in raw) for raw in raw_bytes_gen)
+    return Counter(pretoken_gen)
 
 
-def _process_chunk(args) -> Counter[tuple[bytes, ...]]:
+def _process_chunk(
+    pos: tuple[int, int],
+    path: str | os.PathLike,
+    special_tokens: list[str],
+) -> Counter[tuple[bytes, ...]]:
     """Process a single chunk of the file."""
-    path, start, end, special_tokens = args
+    start, end = pos
     with open(path, "rb") as f:
         f.seek(start)
         data = f.read(end - start).decode("utf-8", errors="ignore")
 
-        if special_tokens:
-            pattern = '|'.join(map(re.escape, special_tokens))
-            docs = re.split(pattern, data)
-        else:
-            docs = [data]
+    if special_tokens:
+        pattern = '|'.join(map(re.escape, special_tokens))
+        docs = re.split(pattern, data)
+    else:
+        docs = [data]
 
-        counter: Counter[tuple[bytes, ...]] = Counter()
-        for doc in docs:
-            counter.update(_pretokenize_text(doc))
-        return counter
+    counter: Counter[tuple[bytes, ...]] = Counter()
+    for doc in docs:
+        counter.update(_pretokenize_text(doc))
+    return counter
 
 
 @timer
@@ -94,17 +99,12 @@ def pretokenize(
     Returns a Counter of pre-token frequencies as tuple[bytes, ...].
     """
     if num_processes is None:
-        num_processes = os.cpu_count() or 4
-
-    desired_chunks = num_processes * 8
+        num_processes = max(1, (os.cpu_count() or 4) - 1)
 
     with open(path, "rb") as f:
-        boundaries = find_chunk_boundaries(f, desired_chunks, b"<|endoftext|>")
+        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
-    tasks = [
-        (path, start, end, special_tokens)
-        for start, end in zip(boundaries[:-1], boundaries[1:])
-    ]
+    tasks = list(zip(boundaries[:-1], boundaries[1:]))
 
     logger.info(f"Processing {len(tasks)} chunks with {num_processes} workers")
     total_counts: Counter[tuple[bytes, ...]] = Counter()
@@ -112,7 +112,11 @@ def pretokenize(
     with ProgressBar() as pbar:
         task_id = pbar.add_task("[cyan]Pretokenizing...", total=len(tasks))
         with Pool(processes=num_processes) as pool:
-            for counter in pool.imap_unordered(_process_chunk, tasks):
+            results = pool.imap_unordered(
+                functools.partial(_process_chunk, path=path, special_tokens=special_tokens),
+                tasks
+            )
+            for counter in results:
                 total_counts.update(counter)
                 pbar.advance(task_id)
 
