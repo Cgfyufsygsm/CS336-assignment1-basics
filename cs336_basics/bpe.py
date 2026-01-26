@@ -73,6 +73,12 @@ def _init_pair_state(word_tokens: dict[tuple[bytes, ...], int]):
     heapq.heapify(heap)
     return pair_counts, pair_to_words, heap
 
+def _rebuild_heap(pair_counts: dict[tuple[bytes, bytes], int]) -> list[tuple[int, tuple[bytes, bytes]]]:
+    """Rebuild heap from current pair_counts to remove stale entries."""
+    heap = [(-count, pair) for pair, count in pair_counts.items() if count > 0]
+    heapq.heapify(heap)
+    return heap
+
 def _next_best_pair(
     pair_counts: dict[tuple[bytes, bytes], int],
     heap: list[tuple[int, tuple[bytes, bytes]]],
@@ -162,13 +168,23 @@ def train_bpe(
     num_merges_needed = vocab_size - len(vocab)
     pbar = tqdm(total=num_merges_needed, desc="BPE merges", unit="merge")
 
+    # Rebuild heap every N merges to prevent unbounded growth
+    heap_rebuild_interval = 500
+    merges_since_rebuild = 0
+
     while len(vocab) < vocab_size:
+        # Periodically rebuild heap to remove stale entries
+        if merges_since_rebuild >= heap_rebuild_interval:
+            heap = _rebuild_heap(pair_counts)
+            merges_since_rebuild = 0
+
         best_pair, _ = _next_best_pair(pair_counts, heap)
         if best_pair is None:
             break
         vocab[next_id] = best_pair[0] + best_pair[1]
         next_id += 1
         merges.append(best_pair)
+        merges_since_rebuild += 1
 
         impacted_words = list(pair_to_words.get(best_pair, ()))
         if not impacted_words:
