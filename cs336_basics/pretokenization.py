@@ -92,12 +92,15 @@ def pretokenize(path: str | os.PathLike,
         tasks.append((path, start, end, special_tokens))
 
     print(f"  Processing {len(tasks)} chunks with {num_processes} workers...")
-    with Pool(processes=num_processes) as pool:
-        results = list(tqdm(pool.imap(process_chunk, tasks), total=len(tasks), desc="  Chunks", unit="chunk"))
-
     total_counts = Counter()
-    for counter in results:
-        total_counts.update(counter)
+    with Pool(processes=num_processes) as pool:
+        for counter in tqdm(
+            pool.imap_unordered(process_chunk, tasks),
+            total=len(tasks),
+            desc="  Chunks",
+            unit="chunk",
+        ):
+            total_counts.update(counter)
 
     return total_counts
 
@@ -123,4 +126,3 @@ if __name__ == "__main__":
     for counter in results:
         total_counts.update(counter)
     print(total_counts.most_common(10))
-

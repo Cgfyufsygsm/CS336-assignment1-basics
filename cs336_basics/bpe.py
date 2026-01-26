@@ -1,3 +1,4 @@
+import gc
 import heapq
 import os
 
@@ -44,31 +45,37 @@ def _update_counts_for_seq(
             pair_counts.pop(pair, None)
 
 def _add_seq_to_index(
-    pair_to_words: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]],
+    pair_to_words: dict[tuple[bytes, bytes], set[int]],
     token_seq: tuple[bytes, ...],
+    word_id: int,
 ) -> None:
     for pair in _iter_pairs(token_seq):
-        pair_to_words.setdefault(pair, set()).add(token_seq)
+        pair_to_words.setdefault(pair, set()).add(word_id)
 
 def _remove_seq_from_index(
-    pair_to_words: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]],
+    pair_to_words: dict[tuple[bytes, bytes], set[int]],
     token_seq: tuple[bytes, ...],
+    word_id: int,
 ) -> None:
     for pair in _iter_pairs(token_seq):
         words = pair_to_words.get(pair)
         if words is None:
             continue
-        words.discard(token_seq)
+        words.discard(word_id)
         if not words:
             pair_to_words.pop(pair, None)
 
-def _init_pair_state(word_tokens: dict[tuple[bytes, ...], int]):
+def _init_pair_state(
+    word_seqs: dict[int, tuple[bytes, ...]],
+    word_counts: dict[int, int],
+):
     pair_counts: dict[tuple[bytes, bytes], int] = {}
-    pair_to_words: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]] = {}
-    for token_seq, count in word_tokens.items():
+    pair_to_words: dict[tuple[bytes, bytes], set[int]] = {}
+    for word_id, token_seq in word_seqs.items():
+        count = word_counts[word_id]
         for pair in _iter_pairs(token_seq):
             pair_counts[pair] = pair_counts.get(pair, 0) + count
-            pair_to_words.setdefault(pair, set()).add(token_seq)
+            pair_to_words.setdefault(pair, set()).add(word_id)
     heap = [(-count, pair) for pair, count in pair_counts.items()]
     heapq.heapify(heap)
     return pair_counts, pair_to_words, heap
@@ -142,10 +149,24 @@ def train_bpe(
     print("\nStep 2/3: Initializing vocabulary...")
     merges = []
 
-    word_tokens = {}
+    word_counts: dict[int, int] = {}
+    word_seqs: dict[int, tuple[bytes, ...]] = {}
+    seq_to_id: dict[tuple[bytes, ...], int] = {}
+    next_word_id = 0
     for pretoken, count in pre_tokens.items():
         token_seq = tuple(bytes([b]) for b in pretoken.encode("utf-8"))
-        word_tokens[token_seq] = word_tokens.get(token_seq, 0) + count
+        existing_id = seq_to_id.get(token_seq)
+        if existing_id is None:
+            word_id = next_word_id
+            next_word_id += 1
+            seq_to_id[token_seq] = word_id
+            word_seqs[word_id] = token_seq
+            word_counts[word_id] = count
+        else:
+            word_counts[existing_id] += count
+
+    del pre_tokens
+    gc.collect()
 
     vocab = {}
     next_id = 0
@@ -163,18 +184,19 @@ def train_bpe(
     print(f"✓ Initial vocabulary size: {len(vocab)} (special tokens + 256 bytes)")
 
     print(f"\nStep 3/3: Learning BPE merges (target vocab size: {vocab_size})...")
-    pair_counts, pair_to_words, heap = _init_pair_state(word_tokens)
+    pair_counts, pair_to_words, heap = _init_pair_state(word_seqs, word_counts)
 
     num_merges_needed = vocab_size - len(vocab)
     pbar = tqdm(total=num_merges_needed, desc="BPE merges", unit="merge")
 
     # Rebuild heap every N merges to prevent unbounded growth
     heap_rebuild_interval = 500
+    heap_max_multiplier = 4
     merges_since_rebuild = 0
 
     while len(vocab) < vocab_size:
         # Periodically rebuild heap to remove stale entries
-        if merges_since_rebuild >= heap_rebuild_interval:
+        if merges_since_rebuild >= heap_rebuild_interval or len(heap) > heap_max_multiplier * len(pair_counts):
             heap = _rebuild_heap(pair_counts)
             merges_since_rebuild = 0
 
@@ -186,25 +208,40 @@ def train_bpe(
         merges.append(best_pair)
         merges_since_rebuild += 1
 
-        impacted_words = list(pair_to_words.get(best_pair, ()))
-        if not impacted_words:
+        impacted_word_ids = list(pair_to_words.get(best_pair, ()))
+        if not impacted_word_ids:
             break
         new_word_counts: dict[tuple[bytes, ...], int] = {}
-        for token_seq in impacted_words:
-            count = word_tokens.pop(token_seq, None)
+        for word_id in impacted_word_ids:
+            count = word_counts.pop(word_id, None)
             if count is None:
                 continue
+            token_seq = word_seqs.pop(word_id, None)
+            if token_seq is None:
+                continue
+            seq_to_id.pop(token_seq, None)
             new_seq, changed = _merge_pair_in_token_seq(token_seq, best_pair)
             if not changed:
-                word_tokens[token_seq] = count
+                word_counts[word_id] = count
+                word_seqs[word_id] = token_seq
+                seq_to_id[token_seq] = word_id
                 continue
             _update_counts_for_seq(pair_counts, heap, token_seq, count, -1)
-            _remove_seq_from_index(pair_to_words, token_seq)
+            _remove_seq_from_index(pair_to_words, token_seq, word_id)
             new_word_counts[new_seq] = new_word_counts.get(new_seq, 0) + count
         for new_seq, count in new_word_counts.items():
-            _update_counts_for_seq(pair_counts, heap, new_seq, count, 1)
-            _add_seq_to_index(pair_to_words, new_seq)
-            word_tokens[new_seq] = word_tokens.get(new_seq, 0) + count
+            existing_id = seq_to_id.get(new_seq)
+            if existing_id is None:
+                new_id = next_word_id
+                next_word_id += 1
+                seq_to_id[new_seq] = new_id
+                word_seqs[new_id] = new_seq
+                word_counts[new_id] = count
+                _update_counts_for_seq(pair_counts, heap, new_seq, count, 1)
+                _add_seq_to_index(pair_to_words, new_seq, new_id)
+            else:
+                word_counts[existing_id] += count
+                _update_counts_for_seq(pair_counts, heap, new_seq, count, 1)
 
         pbar.update(1)
 

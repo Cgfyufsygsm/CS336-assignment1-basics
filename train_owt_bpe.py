@@ -70,6 +70,8 @@ def main():
     input_path = "/data/assignment1-data/owt_train.txt"
     vocab_size = 32000
     special_tokens = ["<|endoftext|>"]
+    enable_tracemalloc = False
+    enable_profiling = False
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)
 
@@ -86,11 +88,14 @@ def main():
     print()
 
     # Start memory tracking
-    tracemalloc.start()
+    if enable_tracemalloc:
+        tracemalloc.start()
 
     # Profile the training process
-    profiler = cProfile.Profile()
-    profiler.enable()
+    profiler = None
+    if enable_profiling:
+        profiler = cProfile.Profile()
+        profiler.enable()
 
     # Time the training
     start_time = time.time()
@@ -103,17 +108,23 @@ def main():
     )
 
     end_time = time.time()
-    profiler.disable()
+    if profiler is not None:
+        profiler.disable()
 
     # Get memory usage
-    current, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    if enable_tracemalloc:
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+    else:
+        current = 0
+        peak = 0
 
     # Calculate training time
     training_time = end_time - start_time
 
     print(f"✓ BPE training completed in {training_time:.2f} seconds ({training_time/60:.2f} minutes)")
-    print(f"✓ Peak memory usage: {peak / 1024**3:.2f} GB")
+    if enable_tracemalloc:
+        print(f"✓ Peak memory usage: {peak / 1024**3:.2f} GB")
     print()
 
     # Serialize to disk
@@ -129,7 +140,8 @@ def main():
     print("Training Statistics")
     print("=" * 80)
     print(f"Training time: {training_time:.2f} seconds ({training_time/60:.2f} minutes, {training_time/3600:.2f} hours)")
-    print(f"Peak memory: {peak / 1024**3:.2f} GB")
+    if enable_tracemalloc:
+        print(f"Peak memory: {peak / 1024**3:.2f} GB")
     print(f"Vocabulary size: {len(vocab)}")
     print(f"Number of merges: {len(merges)}")
     print()
@@ -144,33 +156,40 @@ def main():
         print(f"  Decoded: <unable to decode as UTF-8>")
     print()
 
-    # Print profiling results
-    print("=" * 80)
-    print("Profiling Results - Top 20 Time-Consuming Functions")
-    print("=" * 80)
-    s = StringIO()
-    stats = pstats.Stats(profiler, stream=s)
-    stats.strip_dirs()
-    stats.sort_stats("cumulative")
-    stats.print_stats(20)
-    print(s.getvalue())
-
-    # Save profiling results to file
-    profile_path = output_dir / "owt_bpe_training_profile.txt"
-    with open(profile_path, "w") as f:
-        stats = pstats.Stats(profiler, stream=f)
+    if profiler is not None:
+        # Print profiling results
+        print("=" * 80)
+        print("Profiling Results - Top 20 Time-Consuming Functions")
+        print("=" * 80)
+        s = StringIO()
+        stats = pstats.Stats(profiler, stream=s)
         stats.strip_dirs()
         stats.sort_stats("cumulative")
-        stats.print_stats()
-    print(f"Full profiling results saved to: {profile_path}")
-    print()
+        stats.print_stats(20)
+        print(s.getvalue())
+
+        # Save profiling results to file
+        profile_path = output_dir / "owt_bpe_training_profile.txt"
+        with open(profile_path, "w") as f:
+            stats = pstats.Stats(profiler, stream=f)
+            stats.strip_dirs()
+            stats.sort_stats("cumulative")
+            stats.print_stats()
+        print(f"Full profiling results saved to: {profile_path}")
+        print()
 
     print("=" * 80)
     print("Summary for Assignment Deliverable")
     print("=" * 80)
-    print(f"Training completed in {training_time/60:.2f} minutes using {peak / 1024**3:.2f} GB RAM. " +
-          f"The longest token is {longest_len} bytes long: {repr(longest_token.decode('utf-8', errors='replace'))}, " +
-          f"which makes sense as it likely represents a common multi-character sequence in the owt dataset.")
+    if enable_tracemalloc:
+        memory_summary = f"{peak / 1024**3:.2f} GB RAM"
+    else:
+        memory_summary = "tracemalloc disabled"
+    print(
+        f"Training completed in {training_time/60:.2f} minutes using {memory_summary}. "
+        f"The longest token is {longest_len} bytes long: {repr(longest_token.decode('utf-8', errors='replace'))}, "
+        f"which makes sense as it likely represents a common multi-character sequence in the owt dataset."
+    )
     print()
 
 
