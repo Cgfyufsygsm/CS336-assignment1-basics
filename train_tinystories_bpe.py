@@ -13,7 +13,15 @@ import pstats
 from io import StringIO
 from pathlib import Path
 
-from cs336_basics.bpe import train_bpe
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from cs336_basics.tokenizer.bpe import train_bpe
+from cs336_basics.utils import get_logger
+
+console = Console()
+logger = get_logger(__name__)
 
 
 def serialize_vocab_and_merges(
@@ -22,36 +30,20 @@ def serialize_vocab_and_merges(
     vocab_path: str | Path,
     merges_path: str | Path,
 ) -> None:
-    """
-    Serialize vocabulary and merges to disk.
-
-    Args:
-        vocab: Dictionary mapping token IDs to bytes
-        merges: List of BPE merge operations
-        vocab_path: Path to save vocabulary JSON
-        merges_path: Path to save merges file
-    """
-    # Serialize vocabulary as JSON (convert bytes to string for JSON)
+    """Serialize vocabulary and merges to disk."""
     vocab_json = {k: v.decode("utf-8", errors="replace") for k, v in vocab.items()}
     with open(vocab_path, "w", encoding="utf-8") as f:
         json.dump(vocab_json, f, ensure_ascii=False, indent=2)
 
-    # Serialize merges as text file (one merge per line, space-separated)
     with open(merges_path, "w", encoding="utf-8") as f:
         for token1, token2 in merges:
-            # Use repr-style encoding to handle non-printable bytes
             token1_str = token1.decode("utf-8", errors="replace")
             token2_str = token2.decode("utf-8", errors="replace")
             f.write(f"{token1_str} {token2_str}\n")
 
 
 def find_longest_token(vocab: dict[int, bytes]) -> tuple[int, bytes, int]:
-    """
-    Find the longest token in the vocabulary.
-
-    Returns:
-        Tuple of (token_id, token_bytes, length)
-    """
+    """Find the longest token in the vocabulary."""
     longest_id = -1
     longest_token = b""
     longest_len = 0
@@ -70,32 +62,42 @@ def main():
     input_path = "/data/assignment1-data/TinyStoriesV2-GPT4-train.txt"
     vocab_size = 10000
     special_tokens = ["<|endoftext|>"]
+    enable_tracemalloc = True
+    enable_profiling = True
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)
 
     vocab_path = output_dir / "tinystories_vocab.json"
     merges_path = output_dir / "tinystories_merges.txt"
 
-    print("=" * 80)
-    print("Training BPE Tokenizer on TinyStories Dataset")
-    print("=" * 80)
-    print(f"Input file: {input_path}")
-    print(f"Vocabulary size: {vocab_size}")
-    print(f"Special tokens: {special_tokens}")
-    print(f"Output directory: {output_dir}")
-    print()
+    # Print configuration
+    config_table = Table(title="Configuration", show_header=False, border_style="blue")
+    config_table.add_column("Key", style="cyan")
+    config_table.add_column("Value", style="green")
+    config_table.add_row("Input file", str(input_path))
+    config_table.add_row("Vocabulary size", str(vocab_size))
+    config_table.add_row("Special tokens", str(special_tokens))
+    config_table.add_row("Output directory", str(output_dir))
+    config_table.add_row("Memory tracking", "Enabled" if enable_tracemalloc else "Disabled")
+    config_table.add_row("Profiling", "Enabled" if enable_profiling else "Disabled")
+
+    console.print(Panel("[bold blue]Training BPE Tokenizer on TinyStories Dataset[/]", expand=False))
+    console.print(config_table)
+    console.print()
 
     # Start memory tracking
-    tracemalloc.start()
+    if enable_tracemalloc:
+        tracemalloc.start()
 
     # Profile the training process
-    profiler = cProfile.Profile()
-    profiler.enable()
+    profiler = None
+    if enable_profiling:
+        profiler = cProfile.Profile()
+        profiler.enable()
 
     # Time the training
     start_time = time.time()
 
-    print("Starting BPE training...")
     vocab, merges = train_bpe(
         input_path=input_path,
         vocab_size=vocab_size,
@@ -103,75 +105,78 @@ def main():
     )
 
     end_time = time.time()
-    profiler.disable()
+    if profiler is not None:
+        profiler.disable()
 
     # Get memory usage
-    current, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    if enable_tracemalloc:
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+    else:
+        current = 0
+        peak = 0
 
-    # Calculate training time
     training_time = end_time - start_time
 
-    print(f"✓ BPE training completed in {training_time:.2f} seconds ({training_time/60:.2f} minutes)")
-    print(f"✓ Peak memory usage: {peak / 1024**3:.2f} GB")
-    print()
-
     # Serialize to disk
-    print("Serializing vocabulary and merges to disk...")
+    logger.info("Serializing vocabulary and merges to disk...")
     serialize_vocab_and_merges(vocab, merges, vocab_path, merges_path)
-    print(f"✓ Vocabulary saved to: {vocab_path}")
-    print(f"✓ Merges saved to: {merges_path}")
-    print()
+    logger.info(f"Vocabulary saved to: {vocab_path}")
+    logger.info(f"Merges saved to: {merges_path}")
 
     # Find longest token
     longest_id, longest_token, longest_len = find_longest_token(vocab)
-    print("=" * 80)
-    print("Training Statistics")
-    print("=" * 80)
-    print(f"Training time: {training_time:.2f} seconds ({training_time/60:.2f} minutes, {training_time/3600:.2f} hours)")
-    print(f"Peak memory: {peak / 1024**3:.2f} GB")
-    print(f"Vocabulary size: {len(vocab)}")
-    print(f"Number of merges: {len(merges)}")
-    print()
-    print(f"Longest token:")
-    print(f"  ID: {longest_id}")
-    print(f"  Length: {longest_len} bytes")
-    print(f"  Bytes: {longest_token}")
+
+    # Print statistics
+    stats_table = Table(title="Training Statistics", show_header=False, border_style="green")
+    stats_table.add_column("Metric", style="cyan")
+    stats_table.add_column("Value", style="yellow")
+    stats_table.add_row("Training time", f"{training_time:.2f}s ({training_time/60:.2f}min)")
+    if enable_tracemalloc:
+        stats_table.add_row("Peak memory", f"{peak / 1024**3:.2f} GB")
+    stats_table.add_row("Vocabulary size", str(len(vocab)))
+    stats_table.add_row("Number of merges", str(len(merges)))
+    stats_table.add_row("Longest token ID", str(longest_id))
+    stats_table.add_row("Longest token length", f"{longest_len} bytes")
     try:
         decoded = longest_token.decode("utf-8")
-        print(f"  Decoded: {repr(decoded)}")
+        stats_table.add_row("Longest token", repr(decoded))
     except UnicodeDecodeError:
-        print(f"  Decoded: <unable to decode as UTF-8>")
-    print()
+        stats_table.add_row("Longest token", "<unable to decode>")
 
-    # Print profiling results
-    print("=" * 80)
-    print("Profiling Results - Top 20 Time-Consuming Functions")
-    print("=" * 80)
-    s = StringIO()
-    stats = pstats.Stats(profiler, stream=s)
-    stats.strip_dirs()
-    stats.sort_stats("cumulative")
-    stats.print_stats(20)
-    print(s.getvalue())
+    console.print()
+    console.print(stats_table)
 
-    # Save profiling results to file
-    profile_path = output_dir / "tinystories_bpe_training_profile.txt"
-    with open(profile_path, "w") as f:
-        stats = pstats.Stats(profiler, stream=f)
+    if profiler is not None:
+        console.print()
+        console.print(Panel("[bold]Profiling Results - Top 20 Functions[/]", expand=False))
+        s = StringIO()
+        stats = pstats.Stats(profiler, stream=s)
         stats.strip_dirs()
         stats.sort_stats("cumulative")
-        stats.print_stats()
-    print(f"Full profiling results saved to: {profile_path}")
-    print()
+        stats.print_stats(20)
+        console.print(s.getvalue())
 
-    print("=" * 80)
-    print("Summary for Assignment Deliverable")
-    print("=" * 80)
-    print(f"Training completed in {training_time/60:.2f} minutes using {peak / 1024**3:.2f} GB RAM. " +
-          f"The longest token is {longest_len} bytes long: {repr(longest_token.decode('utf-8', errors='replace'))}, " +
-          f"which makes sense as it likely represents a common multi-character sequence in the TinyStories dataset.")
-    print()
+        profile_path = output_dir / "tinystories_bpe_training_profile.txt"
+        with open(profile_path, "w") as f:
+            stats = pstats.Stats(profiler, stream=f)
+            stats.strip_dirs()
+            stats.sort_stats("cumulative")
+            stats.print_stats()
+        logger.info(f"Full profiling results saved to: {profile_path}")
+
+    # Summary
+    console.print()
+    if enable_tracemalloc:
+        memory_summary = f"{peak / 1024**3:.2f} GB RAM"
+    else:
+        memory_summary = "memory tracking disabled"
+    summary = (
+        f"Training completed in [green]{training_time/60:.2f} minutes[/] using {memory_summary}. "
+        f"Vocabulary: [cyan]{len(vocab)}[/] tokens, [cyan]{len(merges)}[/] merges. "
+        f"Longest token: [yellow]{longest_len}[/] bytes."
+    )
+    console.print(Panel(summary, title="[bold]Summary[/]", border_style="blue"))
 
 
 if __name__ == "__main__":

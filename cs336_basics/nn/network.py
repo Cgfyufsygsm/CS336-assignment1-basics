@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from cs336_basics.layers import Linear
+from cs336_basics.nn.layers import Linear
 
 def SiLU(x: torch.Tensor) -> torch.Tensor:
     """
