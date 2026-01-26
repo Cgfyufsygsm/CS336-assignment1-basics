@@ -69,23 +69,29 @@ def train_bpe(
     byte_pair_counts: dict[tuple[bytes, bytes], int] = defaultdict(int)
     bp_indices: dict[tuple[bytes, bytes], list[int]] = defaultdict(list)
 
-    for pretoken_bytes, freq in pretoken_freqs.items():
-        if len(pretoken_bytes) < 2:
+    logger.info(f"Building pair structures from {len(pretoken_freqs):,} unique pretokens...")
+    with ProgressBar() as pbar:
+        task_id = pbar.add_task("[yellow]Building pairs...", total=len(pretoken_freqs))
+        for pretoken_bytes, freq in pretoken_freqs.items():
+            if len(pretoken_bytes) < 2:
+                byte_pairs.append(None)
+                pbar.advance(task_id)
+                continue
+
+            start_idx = len(byte_pairs)
+            for i in range(len(pretoken_bytes) - 1):
+                pair = (pretoken_bytes[i], pretoken_bytes[i + 1])
+                byte_pair_counts[pair] += freq
+                byte_pairs.append((pair, freq))
+                bp_indices[pair].append(start_idx + i)
+
             byte_pairs.append(None)
-            continue
-
-        start_idx = len(byte_pairs)
-        for i in range(len(pretoken_bytes) - 1):
-            pair = (pretoken_bytes[i], pretoken_bytes[i + 1])
-            byte_pair_counts[pair] += freq
-            byte_pairs.append((pair, freq))
-            bp_indices[pair].append(start_idx + i)
-
-        byte_pairs.append(None)
+            pbar.advance(task_id)
 
     del pretoken_freqs
 
     # Build heap
+    logger.info("Building heap...")
     heap = [_PairEntry(count, pair) for pair, count in byte_pair_counts.items()]
     heapq.heapify(heap)
 

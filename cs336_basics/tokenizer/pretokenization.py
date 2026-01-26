@@ -15,7 +15,7 @@ BYTES_LOOKUP = [bytes([i]) for i in range(256)]
 
 logger = get_logger(__name__)
 
-
+@timer
 def find_chunk_boundaries(
     file: BinaryIO,
     desired_num_chunks: int,
@@ -99,7 +99,7 @@ def pretokenize(
     Returns a Counter of pre-token frequencies as tuple[bytes, ...].
     """
     if num_processes is None:
-        num_processes = max(1, (os.cpu_count() or 4) - 1)
+        num_processes = max(1, ((os.cpu_count() or 4) - 1) // 4)
 
     with open(path, "rb") as f:
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
