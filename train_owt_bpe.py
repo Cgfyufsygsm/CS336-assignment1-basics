@@ -1,5 +1,5 @@
 """
-Train a byte-level BPE tokenizer on the TinyStories dataset.
+Train a byte-level BPE tokenizer on the owt dataset.
 
 This script trains a BPE tokenizer with vocab_size=10,000 including the <|endoftext|> special token,
 serializes the vocabulary and merges to disk, and profiles the training process.
@@ -67,17 +67,17 @@ def find_longest_token(vocab: dict[int, bytes]) -> tuple[int, bytes, int]:
 
 def main():
     # Configuration
-    input_path = "/data/assignment1-data/TinyStoriesV2-GPT4-train.txt"
-    vocab_size = 10000
+    input_path = "/data/assignment1-data/owt_train.txt"
+    vocab_size = 32000
     special_tokens = ["<|endoftext|>"]
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)
 
-    vocab_path = output_dir / "tinystories_vocab.json"
-    merges_path = output_dir / "tinystories_merges.txt"
+    vocab_path = output_dir / "owt_vocab.json"
+    merges_path = output_dir / "owt_merges.txt"
 
     print("=" * 80)
-    print("Training BPE Tokenizer on TinyStories Dataset")
+    print("Training BPE Tokenizer on owt Dataset")
     print("=" * 80)
     print(f"Input file: {input_path}")
     print(f"Vocabulary size: {vocab_size}")
@@ -156,7 +156,7 @@ def main():
     print(s.getvalue())
 
     # Save profiling results to file
-    profile_path = output_dir / "tinystories_bpe_training_profile.txt"
+    profile_path = output_dir / "owt_bpe_training_profile.txt"
     with open(profile_path, "w") as f:
         stats = pstats.Stats(profiler, stream=f)
         stats.strip_dirs()
@@ -170,7 +170,7 @@ def main():
     print("=" * 80)
     print(f"Training completed in {training_time/60:.2f} minutes using {peak / 1024**3:.2f} GB RAM. " +
           f"The longest token is {longest_len} bytes long: {repr(longest_token.decode('utf-8', errors='replace'))}, " +
-          f"which makes sense as it likely represents a common multi-character sequence in the TinyStories dataset.")
+          f"which makes sense as it likely represents a common multi-character sequence in the owt dataset.")
     print()
 
 
