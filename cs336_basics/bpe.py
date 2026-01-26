@@ -5,6 +5,8 @@ import os
 from tqdm import tqdm
 from cs336_basics.pretokenization import pretokenize
 
+BYTE_TOKENS = [bytes([i]) for i in range(256)]
+
 def _iter_pairs(token_seq: tuple[bytes, ...]):
     for i in range(len(token_seq) - 1):
         yield (token_seq[i], token_seq[i + 1])
@@ -154,7 +156,7 @@ def train_bpe(
     seq_to_id: dict[tuple[bytes, ...], int] = {}
     next_word_id = 0
     for pretoken, count in pre_tokens.items():
-        token_seq = tuple(bytes([b]) for b in pretoken.encode("utf-8"))
+        token_seq = tuple(BYTE_TOKENS[b] for b in pretoken.encode("utf-8"))
         existing_id = seq_to_id.get(token_seq)
         if existing_id is None:
             word_id = next_word_id
@@ -178,7 +180,7 @@ def train_bpe(
 
     # add single byte tokens to vocab
     for b in range(256):
-        vocab[next_id] = bytes([b])
+        vocab[next_id] = BYTE_TOKENS[b]
         next_id += 1
 
     print(f"✓ Initial vocabulary size: {len(vocab)} (special tokens + 256 bytes)")
@@ -190,8 +192,8 @@ def train_bpe(
     pbar = tqdm(total=num_merges_needed, desc="BPE merges", unit="merge")
 
     # Rebuild heap every N merges to prevent unbounded growth
-    heap_rebuild_interval = 500
-    heap_max_multiplier = 4
+    heap_rebuild_interval = 200
+    heap_max_multiplier = 2
     merges_since_rebuild = 0
 
     while len(vocab) < vocab_size:
@@ -208,10 +210,9 @@ def train_bpe(
         merges.append(best_pair)
         merges_since_rebuild += 1
 
-        impacted_word_ids = list(pair_to_words.get(best_pair, ()))
+        impacted_word_ids = pair_to_words.pop(best_pair, None)
         if not impacted_word_ids:
             break
-        new_word_counts: dict[tuple[bytes, ...], int] = {}
         for word_id in impacted_word_ids:
             count = word_counts.pop(word_id, None)
             if count is None:
@@ -228,8 +229,6 @@ def train_bpe(
                 continue
             _update_counts_for_seq(pair_counts, heap, token_seq, count, -1)
             _remove_seq_from_index(pair_to_words, token_seq, word_id)
-            new_word_counts[new_seq] = new_word_counts.get(new_seq, 0) + count
-        for new_seq, count in new_word_counts.items():
             existing_id = seq_to_id.get(new_seq)
             if existing_id is None:
                 new_id = next_word_id
