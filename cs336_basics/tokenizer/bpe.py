@@ -48,8 +48,7 @@ def train_bpe(
 
     # Step 1: Pretokenization
     pretoken_freqs = pretokenize(input_path, special_tokens)
-    total_pretokens = sum(pretoken_freqs.values())
-    logger.info(f"Total pretoken occurrences: {total_pretokens:,}")
+    logger.info(f"Unique pretokens: {len(pretoken_freqs):,}")
 
     # Step 2: Build vocabulary
     logger.info("Initializing vocabulary and pair structures...")
