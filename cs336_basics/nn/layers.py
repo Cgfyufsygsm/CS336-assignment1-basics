@@ -19,6 +19,12 @@ class Linear(nn.Module):
 
 class Embedding(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, device=None, dtype=None):
+        """
+        :param num_embeddings: int Size of the vocabulary
+        :param embedding_dim: int Dimensionality of each embedding vector
+        :param device: torch.device Device on which to place the embeddings
+        :param dtype: torch.dtype Data type of the embeddings
+        """
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim

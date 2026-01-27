@@ -40,16 +40,18 @@ class MultiheadSelfAttention(nn.Module):
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None) -> torch.Tensor:
         # x: (..., seq_len, d_model)
         q, k, v = self.W_Q(x), self.W_K(x), self.W_V(x) # (..., seq_len, d_model)
-        q = q.view(*q.shape[:-1], self.num_heads, self.head_dim).transpose(-3, -2) # (..., num_heads, seq_len, head_dim)
+        q = q.view(*q.shape[:-1], self.num_heads, self.head_dim).transpose(-3, -2).contiguous() # (..., num_heads, seq_len, head_dim)
         # -2 is num_heads, -3 is seq_len, so need to transpose
-        k = k.view(*k.shape[:-1], self.num_heads, self.head_dim).transpose(-3, -2) # (..., num_heads, seq_len, head_dim)
-        v = v.view(*v.shape[:-1], self.num_heads, self.head_dim).transpose(-3, -2) # (..., num_heads, seq_len, head_dim)
+        k = k.view(*k.shape[:-1], self.num_heads, self.head_dim).transpose(-3, -2).contiguous() # (..., num_heads, seq_len, head_dim)
+        v = v.view(*v.shape[:-1], self.num_heads, self.head_dim).transpose(-3, -2).contiguous() # (..., num_heads, seq_len, head_dim)
         mask = torch.tril(torch.ones((x.shape[-2], x.shape[-2]), dtype=torch.bool, device=x.device)) # (seq_len, seq_len)
         # score[i, j] means how i attends to j, so we want to mask out j > i
         # so for j > i, we set mask[i, j] = False, thus lower triangular
 
         if self.rope is not None:
-            assert token_positions is not None, "token_positions must be provided when using RoPE."
+            # assert token_positions is not None, "token_positions must be provided when using RoPE."
+            if token_positions is None:
+                token_positions = torch.arange(x.shape[-2], device=x.device)
             q = self.rope(q, token_positions)
             k = self.rope(k, token_positions)
 
