@@ -181,8 +181,10 @@ def _build_model(cfg: AppConfig, device: torch.device) -> torch.nn.Module:
     return model
 
 
-def _load_memmap(path: str, dtype: str) -> np.memmap:
-    return np.memmap(path, dtype=np.dtype(dtype), mode="r")
+def _load_memmap(path: str, dtype: str) -> np.ndarray:
+    if Path(path).suffix != ".npy":
+        raise ValueError("Expected a .npy dataset path.")
+    return np.load(path, mmap_mode="r")
 
 
 def _compute_loss(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
@@ -256,7 +258,7 @@ def main():
         else:
             wandb.init(
                 project=cfg.logging.wandb_project,
-                name=cfg.logging.wandb_run_name or cfg.train.experiment_name,
+                name=cfg.train.experiment_name,
                 config=dataclasses.asdict(cfg),
             )
 
