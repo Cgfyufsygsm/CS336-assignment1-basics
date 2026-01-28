@@ -67,7 +67,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Encode a text dataset into token IDs (memmap).")
     parser.add_argument("--input", required=True, type=Path, help="Path to input text file.")
     parser.add_argument("--vocab", required=True, type=Path, help="Path to tokenizer vocab.json.")
-    parser.add_argument("--merges", required=True, type=Path, help="Path to tokenizer merges.txt.")
+    parser.add_argument("--merges", required=True, type=Path, help="Path to tokenizer merges.json.")
     parser.add_argument("--output", required=True, type=Path, help="Path to output .npy file.")
     parser.add_argument("--dtype", default="uint16", help="Numpy dtype for token IDs.")
     parser.add_argument(

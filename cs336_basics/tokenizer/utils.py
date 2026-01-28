@@ -23,9 +23,17 @@ def serialize_vocab_and_merges(
     with open(vocab_path, "w", encoding="utf-8") as f:
         json.dump(vocab_json, f, ensure_ascii=False, indent=2)
 
-    merges_json = [[token1.decode("latin-1"), token2.decode("latin-1")] for token1, token2 in merges]
+    # Write merges in compact format: one pair per line
     with open(merges_path, "w", encoding="utf-8") as f:
-        json.dump(merges_json, f, ensure_ascii=False, indent=2)
+        f.write("[\n")
+        for i, (token1, token2) in enumerate(merges):
+            pair = [token1.decode("latin-1"), token2.decode("latin-1")]
+            line = json.dumps(pair, ensure_ascii=False)
+            if i < len(merges) - 1:
+                f.write(f"  {line},\n")
+            else:
+                f.write(f"  {line}\n")
+        f.write("]\n")
 
 
 def find_longest_token(vocab: dict[int, bytes]) -> tuple[int, bytes, int]:

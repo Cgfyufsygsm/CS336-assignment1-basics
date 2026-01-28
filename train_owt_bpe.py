@@ -35,7 +35,7 @@ def main():
     output_dir.mkdir(exist_ok=True)
 
     vocab_path = output_dir / "owt_vocab.json"
-    merges_path = output_dir / "owt_merges.txt"
+    merges_path = output_dir / "owt_merges.json"
 
     # Print configuration
     config_table = Table(title="Configuration", show_header=False, border_style="blue")
