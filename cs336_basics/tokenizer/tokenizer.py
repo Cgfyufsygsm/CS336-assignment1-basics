@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import os
 import regex as re
 from typing import Iterable, Iterator
@@ -24,9 +25,9 @@ class Tokenizer:
         self.special_tokens = special_tokens if special_tokens is not None else []
     
     @classmethod
-    def from_file(cls, 
-                  vocab_path: str | os.PathLike, 
-                  merges_path: str | os.PathLike, 
+    def from_file(cls,
+                  vocab_path: str | os.PathLike,
+                  merges_path: str | os.PathLike,
                   special_tokens: list[str] | None = None) -> "Tokenizer":
         """
         Class method that constructs and return a Tokenizer from a serialized vocabulary and list of merges (in the same format that BPE training code output) and (optionally) a list of special tokens. This method should accept the following additional parameters:
@@ -35,12 +36,10 @@ class Tokenizer:
             vocab_json = json.load(f)
         vocab = {int(k): v.encode("utf-8") for k, v in vocab_json.items()}
 
-        merges = []
         with open(merges_path, "r", encoding="utf-8") as f:
-            for line in f:
-                token1, token2 = line.rstrip().split(" ")
-                merges.append((token1.encode("utf-8"), token2.encode("utf-8")))
-        
+            merges_json = json.load(f)
+        merges = [(token1.encode("latin-1"), token2.encode("latin-1")) for token1, token2 in merges_json]
+
         return cls(vocab=vocab, merges=merges, special_tokens=special_tokens)
 
     def generate_bpe(self, text: str, res: list[int]) -> None:
@@ -107,13 +106,61 @@ class Tokenizer:
 
         self.generate_bpe(text[pos:], res)
         return res
-    
-    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+
+    def _encode_batch_worker(self, chunk: list[str]) -> list[list[int]]:
+        """Worker function to encode a batch of texts."""
+        return [self.encode(text) for text in chunk]
+
+    def _parallel_encode(self, chunk: list[str], pool_size: int) -> Iterator[int]:
+        """Parallel encode a batch of texts."""
+        if pool_size == 1:
+            # Single process mode
+            for text in chunk:
+                yield from self.encode(text)
+        else:
+            # Multi-process mode
+            batch_size = (len(chunk) + pool_size - 1) // pool_size
+            mini_batches = [chunk[i:i + batch_size] for i in range(0, len(chunk), batch_size)]
+
+            with multiprocessing.Pool(processes=pool_size) as pool:
+                results_of_lists = pool.map(self._encode_batch_worker, mini_batches)
+
+            # Stream results
+            for worker_result in results_of_lists:
+                for ids in worker_result:
+                    yield from ids
+
+    def encode_iterable(
+        self,
+        iterable: Iterable[str],
+        chunk_size: int = 10240,
+        pool_size: int | None = None,
+    ) -> Iterator[int]:
         """
-        Given an iterable of strings (e.g., a Python file handle), return a generator that lazily yields token IDs. This is required for memory-efficient tokenization of large files that we cannot directly load into memory.
+        Given an iterable of strings (e.g., a Python file handle), return a generator that lazily yields token IDs.
+        This is required for memory-efficient tokenization of large files that we cannot directly load into memory.
+
+        Args:
+            iterable: An iterable of strings to encode (e.g., file handle)
+            chunk_size: Number of strings to accumulate before parallel processing (default: 10240)
+            pool_size: Number of processes to use (default: cpu_count - 1, or 1 if cpu_count unavailable)
+
+        Yields:
+            Token IDs one at a time
         """
-        for chunk in iterable:
-            yield from self.encode(chunk)
+        if pool_size is None:
+            pool_size = max(1, (os.cpu_count() or 2) - 1)
+
+        chunk = []
+        for item in iterable:
+            chunk.append(item)
+            if len(chunk) >= chunk_size:
+                yield from self._parallel_encode(chunk, pool_size)
+                chunk = []
+
+        # Process remaining items
+        if chunk:
+            yield from self._parallel_encode(chunk, pool_size)
     
     def decode(self, ids: list[int]) -> str:
         """
