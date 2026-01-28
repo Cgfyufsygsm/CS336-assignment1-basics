@@ -32,22 +32,35 @@ def encode_to_memmap(
             f"(max {dtype_info.max})."
         )
 
-    with open(input_path, "r", encoding="utf-8") as f:
-        n_tokens = sum(1 for _ in tokenizer.encode_iterable(f))
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    arr = np.lib.format.open_memmap(output_path, mode="w+", dtype=np.dtype(dtype), shape=(n_tokens,))
+    # Single-pass encoding: accumulate tokens in a list first
+    print(f"Encoding {input_path}...")
+    tokens = []
 
     with open(input_path, "r", encoding="utf-8") as f, ProgressBar() as progress:
-        task_id = progress.add_task("Encoding tokens", total=n_tokens)
-        i = 0
-        for token_id in tokenizer.encode_iterable(f):
-            arr[i] = token_id
-            i += 1
-            progress.update(task_id, advance=1)
+        # Use indeterminate progress bar since we don't know total tokens yet
+        task_id = progress.add_task("Encoding tokens", total=None)
+        batch_size = 100000  # Update progress every 100k tokens
+        batch_count = 0
 
-    arr.flush()
-    print(f"Wrote {n_tokens} tokens to {output_path}")
+        for token_id in tokenizer.encode_iterable(f):
+            tokens.append(token_id)
+            batch_count += 1
+
+            if batch_count >= batch_size:
+                progress.update(task_id, advance=batch_count)
+                batch_count = 0
+
+        # Update final batch
+        if batch_count > 0:
+            progress.update(task_id, advance=batch_count)
+
+    # Convert to numpy array and save
+    print(f"Converting {len(tokens):,} tokens to numpy array...")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    arr = np.array(tokens, dtype=np.dtype(dtype))
+    np.save(output_path, arr)
+
+    print(f"Wrote {len(tokens):,} tokens to {output_path}")
 
 
 def main() -> None:
@@ -55,7 +68,7 @@ def main() -> None:
     parser.add_argument("--input", required=True, type=Path, help="Path to input text file.")
     parser.add_argument("--vocab", required=True, type=Path, help="Path to tokenizer vocab.json.")
     parser.add_argument("--merges", required=True, type=Path, help="Path to tokenizer merges.txt.")
-    parser.add_argument("--output", required=True, type=Path, help="Path to output .bin file.")
+    parser.add_argument("--output", required=True, type=Path, help="Path to output .npy file.")
     parser.add_argument("--dtype", default="uint16", help="Numpy dtype for token IDs.")
     parser.add_argument(
         "--special_tokens",
