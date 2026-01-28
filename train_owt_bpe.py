@@ -5,7 +5,6 @@ This script trains a BPE tokenizer with vocab_size=32,000 including the <|endoft
 serializes the vocabulary and merges to disk, and profiles the training process.
 """
 
-import json
 import time
 import tracemalloc
 import cProfile
@@ -18,50 +17,16 @@ from rich.panel import Panel
 from rich.table import Table
 
 from cs336_basics.tokenizer.bpe import train_bpe
+from cs336_basics.tokenizer.utils import serialize_vocab_and_merges, find_longest_token
 from cs336_basics.utils import get_logger
 
 console = Console()
 logger = get_logger(__name__)
 
 
-def serialize_vocab_and_merges(
-    vocab: dict[int, bytes],
-    merges: list[tuple[bytes, bytes]],
-    vocab_path: str | Path,
-    merges_path: str | Path,
-) -> None:
-    """Serialize vocabulary and merges to disk."""
-    vocab_json = {k: v.decode("utf-8", errors="replace") for k, v in vocab.items()}
-    with open(vocab_path, "w", encoding="utf-8") as f:
-        json.dump(vocab_json, f, ensure_ascii=False, indent=2)
-
-    # Serialize merges as text file (one merge per line, space-separated)
-    with open(merges_path, "w", encoding="utf-8") as f:
-        for token1, token2 in merges:
-            # Use repr-style encoding to handle non-printable bytes
-            token1_str = token1.decode("utf-8", errors="replace")
-            token2_str = token2.decode("utf-8", errors="replace")
-            f.write(f"{token1_str} {token2_str}\n")
-
-
-def find_longest_token(vocab: dict[int, bytes]) -> tuple[int, bytes, int]:
-    """Find the longest token in the vocabulary."""
-    longest_id = -1
-    longest_token = b""
-    longest_len = 0
-
-    for token_id, token_bytes in vocab.items():
-        if len(token_bytes) > longest_len:
-            longest_id = token_id
-            longest_token = token_bytes
-            longest_len = len(token_bytes)
-
-    return longest_id, longest_token, longest_len
-
-
 def main():
     # Configuration
-    input_path = "/data/assignment1-data/owt_train.txt"
+    input_path = "/root/assignment1-data/owt_train.txt"
     vocab_size = 32000
     special_tokens = ["<|endoftext|>"]
     enable_tracemalloc = False
