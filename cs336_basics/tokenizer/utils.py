@@ -68,10 +68,17 @@ def serialize_vocab_and_merges(
     """
     vocab_json = {encode_token_gpt2(token_bytes): token_id for token_id, token_bytes in vocab.items()}
     with open(vocab_path, "w", encoding="utf-8") as f:
-        json.dump(vocab_json, f, ensure_ascii=False, indent=2)
+        json.dump(vocab_json, f, ensure_ascii=False, separators=(",", ":"))
 
     with open(merges_path, "w", encoding="utf-8") as f:
-        json.dump(_encode_merges_gpt2(merges), f, ensure_ascii=False, indent=2)
+        f.write("[\n")
+        for i, pair in enumerate(_encode_merges_gpt2(merges)):
+            line = json.dumps(pair, ensure_ascii=False, separators=(",", ":"))
+            if i < len(merges) - 1:
+                f.write(f"  {line},\n")
+            else:
+                f.write(f"  {line}\n")
+        f.write("]\n")
 
 
 def find_longest_token(vocab: dict[int, bytes]) -> tuple[int, bytes, int]:
