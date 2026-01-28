@@ -19,7 +19,7 @@ def serialize_vocab_and_merges(
         vocab_path: Path to save vocabulary JSON file
         merges_path: Path to save merges JSON file
     """
-    vocab_json = {k: v.decode("utf-8", errors="replace") for k, v in vocab.items()}
+    vocab_json = {k: v.decode("latin-1") for k, v in vocab.items()}
     with open(vocab_path, "w", encoding="utf-8") as f:
         json.dump(vocab_json, f, ensure_ascii=False, indent=2)
 

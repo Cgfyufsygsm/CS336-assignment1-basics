@@ -34,7 +34,7 @@ class Tokenizer:
         """
         with open(vocab_path, "r", encoding="utf-8") as f:
             vocab_json = json.load(f)
-        vocab = {int(k): v.encode("utf-8") for k, v in vocab_json.items()}
+        vocab = {int(k): v.encode("latin-1") for k, v in vocab_json.items()}
 
         with open(merges_path, "r", encoding="utf-8") as f:
             merges_json = json.load(f)
