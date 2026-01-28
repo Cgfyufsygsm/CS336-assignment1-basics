@@ -67,3 +67,28 @@ class AdamW(torch.optim.Optimizer):
                 p.data -= alpha_t * state["m"] / (torch.sqrt(state["v"]) + eps)
                 p.data -= lr * weight_decay * p.data
         return loss
+
+def lr_cosine_schedule(
+    it: int,
+    max_learning_rate: float,
+    min_learning_rate: float,
+    warmup_iters: int,
+    cosine_cycle_iters: int,
+):
+    if it < warmup_iters:
+        lr = it / warmup_iters * max_learning_rate
+    elif it <= cosine_cycle_iters:
+        lr = min_learning_rate + 0.5 * (max_learning_rate - min_learning_rate) * (1 + math.cos(math.pi * (it - warmup_iters) / (cosine_cycle_iters - warmup_iters)))
+    else:
+        lr = min_learning_rate
+    return lr
+
+def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float):
+    eps = 1e-6
+    for p in parameters:
+        if p.grad is None:
+            continue
+        param_norm = p.grad.data.norm(2)
+        if param_norm > max_l2_norm:
+            clip_coef = max_l2_norm / (param_norm + eps)
+            p.grad.data.mul_(clip_coef)
