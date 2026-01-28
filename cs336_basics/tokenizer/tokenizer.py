@@ -4,6 +4,8 @@ import os
 import regex as re
 from typing import Iterable, Iterator
 
+from cs336_basics.tokenizer.utils import decode_token_gpt2
+
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 class Tokenizer:
@@ -34,11 +36,13 @@ class Tokenizer:
         """
         with open(vocab_path, "r", encoding="utf-8") as f:
             vocab_json = json.load(f)
-        vocab = {int(k): v.encode("latin-1") for k, v in vocab_json.items()}
+        if not vocab_json or not all(isinstance(v, int) for v in vocab_json.values()):
+            raise ValueError("Expected GPT-2 style vocab JSON (token -> id).")
+        vocab = {v: decode_token_gpt2(k) for k, v in vocab_json.items()}
 
         with open(merges_path, "r", encoding="utf-8") as f:
             merges_json = json.load(f)
-        merges = [(token1.encode("latin-1"), token2.encode("latin-1")) for token1, token2 in merges_json]
+        merges = [(decode_token_gpt2(token1), decode_token_gpt2(token2)) for token1, token2 in merges_json]
 
         return cls(vocab=vocab, merges=merges, special_tokens=special_tokens)
 
