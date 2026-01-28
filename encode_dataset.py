@@ -1,4 +1,6 @@
 import argparse
+import io
+import os
 from pathlib import Path
 
 import numpy as np
@@ -32,35 +34,41 @@ def encode_to_memmap(
             f"(max {dtype_info.max})."
         )
 
-    # Single-pass encoding: accumulate tokens in a list first
+    # Single-pass encoding with byte-based progress for ETA.
     print(f"Encoding {input_path}...")
-    tokens = []
+    file_size = input_path.stat().st_size
+    chunk_size = 10240
+    pool_size = max(1, (os.cpu_count() or 2) - 1)
 
-    with open(input_path, "r", encoding="utf-8") as f, ProgressBar() as progress:
-        # Use indeterminate progress bar since we don't know total tokens yet
-        task_id = progress.add_task("Encoding tokens", total=None)
-        batch_size = 100000  # Update progress every 100k tokens
-        batch_count = 0
+    def token_generator():
+        with open(input_path, "rb") as raw, ProgressBar() as progress:
+            text_stream = io.TextIOWrapper(raw, encoding="utf-8")
+            task_id = progress.add_task("Encoding tokens", total=file_size)
+            last_pos = raw.tell()
+            chunk: list[str] = []
 
-        for token_id in tokenizer.encode_iterable(f):
-            tokens.append(token_id)
-            batch_count += 1
+            for line in text_stream:
+                chunk.append(line)
+                if len(chunk) >= chunk_size:
+                    yield from tokenizer._parallel_encode(chunk, pool_size)
+                    chunk.clear()
+                    new_pos = raw.tell()
+                    progress.update(task_id, advance=new_pos - last_pos)
+                    last_pos = new_pos
 
-            if batch_count >= batch_size:
-                progress.update(task_id, advance=batch_count)
-                batch_count = 0
+            if chunk:
+                yield from tokenizer._parallel_encode(chunk, pool_size)
+                new_pos = raw.tell()
+                progress.update(task_id, advance=new_pos - last_pos)
 
-        # Update final batch
-        if batch_count > 0:
-            progress.update(task_id, advance=batch_count)
+    arr = np.fromiter(token_generator(), dtype=np.dtype(dtype))
 
-    # Convert to numpy array and save
-    print(f"Converting {len(tokens):,} tokens to numpy array...")
+    # Save
+    print(f"Writing {arr.size:,} tokens to {output_path}...")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    arr = np.array(tokens, dtype=np.dtype(dtype))
     np.save(output_path, arr)
 
-    print(f"Wrote {len(tokens):,} tokens to {output_path}")
+    print(f"Wrote {arr.size:,} tokens to {output_path}")
 
 
 def main() -> None:
