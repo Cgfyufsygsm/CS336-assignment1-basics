@@ -28,7 +28,7 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-    from cs336_basics.layers import Linear
+    from cs336_basics.nn.layers import Linear
     linear = Linear(d_in, d_out)
     linear.weight.data = weights
     return linear(in_features)
@@ -52,7 +52,7 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-    from cs336_basics.layers import Embedding
+    from cs336_basics.nn.layers import Embedding
     embedding = Embedding(vocab_size, d_model)
     embedding.weight.data = weights
     return embedding(token_ids)
@@ -87,7 +87,7 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    from cs336_basics.network import SwiGLU
+    from cs336_basics.nn.network import SwiGLU
     swiglu = SwiGLU(d_model, d_ff)
     swiglu.linear1.weight.data = w1_weight
     swiglu.linear2.weight.data = w2_weight
@@ -224,7 +224,7 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    from cs336_basics.layers import RotaryPositionalEmbedding
+    from cs336_basics.nn.layers import RotaryPositionalEmbedding
     rope = RotaryPositionalEmbedding(theta, d_k, max_seq_len)
     return rope(in_query_or_key, token_positions)
 
@@ -430,7 +430,7 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    from cs336_basics.layers import RMSNorm
+    from cs336_basics.nn.layers import RMSNorm
     rmsnorm = RMSNorm(d_model, eps)
     rmsnorm.gain.data = weights
     return rmsnorm(in_features)
@@ -447,7 +447,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    from cs336_basics.network import SiLU
+    from cs336_basics.nn.network import SiLU
     return SiLU(in_features)
 
 
@@ -471,7 +471,8 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    from cs336_basics.data import get_batch
+    return get_batch(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
@@ -487,7 +488,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    from cs336_basics.util import softmax
+    from cs336_basics.nn.util import softmax
     return softmax(in_features, dim)
 
 
@@ -576,7 +577,8 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
+    from cs336_basics.checkpoint import save_checkpoint
+    save_checkpoint(model, optimizer, iteration, out)
 
 
 def run_load_checkpoint(
@@ -597,7 +599,8 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    from cs336_basics.checkpoint import load_checkpoint
+    return load_checkpoint(src, model, optimizer)
 
 
 def get_tokenizer(
@@ -620,7 +623,7 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    from cs336_basics.tokenizer import Tokenizer
+    from cs336_basics.tokenizer.tokenizer import Tokenizer
     return Tokenizer(vocab=vocab, merges=merges, special_tokens=special_tokens)
 
 
