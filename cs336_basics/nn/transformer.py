@@ -5,6 +5,7 @@ from cs336_basics.nn.attention import MultiheadSelfAttention
 from cs336_basics.nn.layers import Embedding, Linear, RMSNorm
 from cs336_basics.nn.layers import RotaryPositionalEmbedding
 from cs336_basics.nn.network import SwiGLU
+from cs336_basics.nn.decoding import generate_tokens
 from cs336_basics.nn.util import softmax
 
 class TransformerBlock(nn.Module):
@@ -45,3 +46,25 @@ class TransformerLM(nn.Module):
         x = self.norm(x)
         x = self.linear(x)
         return x
+
+    @torch.no_grad()
+    def generate(
+        self,
+        prompt_ids: torch.Tensor | list[int],
+        max_new_tokens: int,
+        eos_id: int | None = None,
+        temperature: float = 1.0,
+        top_p: float = 1.0,
+        context_length: int | None = None,
+        rng: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        return generate_tokens(
+            self,
+            prompt_ids=prompt_ids,
+            max_new_tokens=max_new_tokens,
+            eos_id=eos_id,
+            temperature=temperature,
+            top_p=top_p,
+            context_length=context_length,
+            rng=rng,
+        )
