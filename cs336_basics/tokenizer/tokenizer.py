@@ -1,5 +1,6 @@
 import json
 import multiprocessing
+from multiprocessing.pool import Pool
 import os
 import regex as re
 from typing import Iterable, Iterator
@@ -7,6 +8,20 @@ from typing import Iterable, Iterator
 from cs336_basics.tokenizer.utils import decode_token_gpt2
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+PRETOKEN_RE = re.compile(PAT)
+
+_WORKER_TOKENIZER = None
+
+
+def _init_worker(tokenizer: "Tokenizer") -> None:
+    global _WORKER_TOKENIZER
+    _WORKER_TOKENIZER = tokenizer
+
+
+def _encode_batch_worker_global(chunk: list[str]) -> list[list[int]]:
+    if _WORKER_TOKENIZER is None:
+        raise RuntimeError("Tokenizer worker is not initialized.")
+    return [_WORKER_TOKENIZER.encode(text) for text in chunk]
 
 class Tokenizer:
     def __init__(self, 
@@ -25,6 +40,11 @@ class Tokenizer:
                     self.byte_to_id[token.encode("utf-8")] = next_id
                     next_id += 1
         self.special_tokens = special_tokens if special_tokens is not None else []
+        if self.special_tokens:
+            pattern = "|".join(sorted(map(re.escape, self.special_tokens), key=len, reverse=True))
+            self._special_re = re.compile(pattern)
+        else:
+            self._special_re = None
     
     @classmethod
     def from_file(cls,
@@ -54,16 +74,18 @@ class Tokenizer:
         if not text:
             return # return on empty string
 
-        for pretoken_match in re.finditer(PAT, text):
+        merge_ranks = self.merge_ranks
+        byte_to_id = self.byte_to_id
+        for pretoken_match in PRETOKEN_RE.finditer(text):
             pretoken = pretoken_match.group(0)
             tokens = [bytes([b]) for b in pretoken.encode("utf-8")]
             if len(tokens) >= 2:
                 while True:
-                    pairs = {(tokens[i], tokens[i + 1]) for i in range(len(tokens) - 1)}
                     best_pair = None
                     best_rank = None
-                    for pair in pairs:
-                        rank = self.merge_ranks.get(pair)
+                    for i in range(len(tokens) - 1):
+                        pair = (tokens[i], tokens[i + 1])
+                        rank = merge_ranks.get(pair)
                         if rank is None:
                             continue
                         if best_rank is None or rank < best_rank:
@@ -87,10 +109,10 @@ class Tokenizer:
                     tokens = merged
 
             for token in tokens:
-                if token in self.byte_to_id:
-                    res.append(self.byte_to_id[token])
-                else:
+                token_id = byte_to_id.get(token)
+                if token_id is None:
                     raise ValueError(f"Token {token} not in vocabulary.")
+                res.append(token_id)
 
     
     def encode(self, text: str) -> list[int]:
@@ -98,12 +120,11 @@ class Tokenizer:
         Encode an input text into a sequence of token IDs.
         """
         res = []
-        if not self.special_tokens:
+        if not self._special_re:
             self.generate_bpe(text, res)
             return res
-        pattern = "|".join(sorted(map(re.escape, self.special_tokens), key=len, reverse=True))
         pos = 0
-        for m in re.finditer(pattern, text):
+        for m in self._special_re.finditer(text):
             self.generate_bpe(text[pos:m.start()], res)
             res.append(self.byte_to_id[m.group(0).encode("utf-8")])
             pos = m.end()
@@ -115,24 +136,43 @@ class Tokenizer:
         """Worker function to encode a batch of texts."""
         return [self.encode(text) for text in chunk]
 
-    def _parallel_encode(self, chunk: list[str], pool_size: int) -> Iterator[int]:
+    def _parallel_encode(
+        self,
+        chunk: list[str],
+        pool_size: int | None = None,
+        pool: Pool | None = None,
+    ) -> Iterator[int]:
         """Parallel encode a batch of texts."""
-        if pool_size == 1:
+        if pool_size is None:
+            pool_size = max(1, (os.cpu_count() or 2) - 1)
+        if pool is None and pool_size == 1:
             # Single process mode
             for text in chunk:
                 yield from self.encode(text)
-        else:
-            # Multi-process mode
-            batch_size = (len(chunk) + pool_size - 1) // pool_size
-            mini_batches = [chunk[i:i + batch_size] for i in range(0, len(chunk), batch_size)]
+            return
 
-            with multiprocessing.Pool(processes=pool_size) as pool:
-                results_of_lists = pool.map(self._encode_batch_worker, mini_batches)
+        # Multi-process mode
+        batch_size = (len(chunk) + pool_size - 1) // pool_size
+        mini_batches = [chunk[i:i + batch_size] for i in range(0, len(chunk), batch_size)]
+        if pool is None:
+            with multiprocessing.Pool(
+                processes=pool_size,
+                initializer=_init_worker,
+                initargs=(self,),
+            ) as local_pool:
+                for worker_result in local_pool.imap(_encode_batch_worker_global, mini_batches):
+                    for ids in worker_result:
+                        yield from ids
+            return
 
-            # Stream results
-            for worker_result in results_of_lists:
-                for ids in worker_result:
-                    yield from ids
+        use_worker_state = getattr(pool, "_initializer", None) is _init_worker
+        worker_fn = _encode_batch_worker_global if use_worker_state else self._encode_batch_worker
+        for worker_result in pool.imap(worker_fn, mini_batches):
+            for ids in worker_result:
+                yield from ids
+
+    def create_pool(self, pool_size: int) -> Pool:
+        return multiprocessing.Pool(processes=pool_size, initializer=_init_worker, initargs=(self,))
 
     def encode_iterable(
         self,
@@ -152,19 +192,25 @@ class Tokenizer:
         Yields:
             Token IDs one at a time
         """
-        if pool_size is None:
-            pool_size = max(1, (os.cpu_count() or 2) - 1)
-
         chunk = []
-        for item in iterable:
-            chunk.append(item)
-            if len(chunk) >= chunk_size:
-                yield from self._parallel_encode(chunk, pool_size)
-                chunk = []
+        if pool_size == 1:
+            for item in iterable:
+                chunk.append(item)
+                if len(chunk) >= chunk_size:
+                    yield from self._parallel_encode(chunk, pool_size=1)
+                    chunk = []
+            if chunk:
+                yield from self._parallel_encode(chunk, pool_size=1)
+            return
 
-        # Process remaining items
-        if chunk:
-            yield from self._parallel_encode(chunk, pool_size)
+        with self.create_pool(pool_size) as pool:
+            for item in iterable:
+                chunk.append(item)
+                if len(chunk) >= chunk_size:
+                    yield from self._parallel_encode(chunk, pool_size=pool_size, pool=pool)
+                    chunk = []
+            if chunk:
+                yield from self._parallel_encode(chunk, pool_size=pool_size, pool=pool)
     
     def decode(self, ids: list[int]) -> str:
         """
