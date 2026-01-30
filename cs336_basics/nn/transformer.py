@@ -23,8 +23,10 @@ class TransformerBlock(nn.Module):
         self.ffn = SwiGLU(d_model, d_ff)
 
     def forward(self, x: torch.Tensor):
-        y = x + self.attn(self.norm1(x))
-        return y + self.ffn(self.norm2(y))
+        y = x + self.attn(x)
+        y = self.norm1(y)
+        y = y + self.ffn(y)
+        return self.norm2(y)
     
 class TransformerLM(nn.Module):
     def __init__(self, d_model: int, num_heads: int, d_ff: int, vocab_size: int, context_length: int, num_layers: int, rope_theta: float = 100000.0):
