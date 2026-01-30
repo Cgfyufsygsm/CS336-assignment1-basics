@@ -6,6 +6,7 @@ from typing import Tuple
 
 @dataclass
 class DataConfig:
+    dataset: str = "tinystories"
     train_data: str = ""
     val_data: str = ""
     dtype: str = "uint16"
@@ -20,8 +21,7 @@ class ModelConfig:
     n_layers: int = 4   
     n_heads: int = 16
     d_ff: int = 1344
-    dropout: float = 0.0
-    tie_embeddings: bool = True
+    tie_embeddings: bool = False
 
 
 @dataclass
@@ -35,15 +35,15 @@ class OptimConfig:
 
 @dataclass
 class ScheduleConfig:
-    warmup_iters: int = 1000
-    cosine_cycle_iters: int = 20000
-    min_lr: float = 3e-5
+    warmup_iters: int = 500
+    cosine_cycle_iters: int = 10000
+    min_lr: float = 1e-5
 
 
 @dataclass
 class TrainConfig:
-    batch_size: int = 64
-    max_iters: int = 20000
+    batch_size: int = 128
+    max_iters: int = 10000
     eval_every: int = 500
     eval_iters: int = 100
     log_every: int = 50
@@ -53,7 +53,7 @@ class TrainConfig:
 
 @dataclass
 class CheckpointConfig:
-    every: int = 1000
+    every: int = 5000
     resume: bool = False
 
 

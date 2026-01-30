@@ -1,5 +1,6 @@
 import argparse
 import dataclasses
+import json
 from pathlib import Path
 import time
 
@@ -23,8 +24,7 @@ def parse_args_to_config() -> AppConfig:
     parser = argparse.ArgumentParser(description="Train a language model.")
 
     # Data
-    parser.add_argument("--train_data", default=cfg.data.train_data)
-    parser.add_argument("--val_data", default=cfg.data.val_data)
+    parser.add_argument("--dataset", choices=("tinystories", "owt"), default=cfg.data.dataset)
     parser.add_argument("--dtype", default=cfg.data.dtype)
     parser.add_argument("--device", default=cfg.data.device)
 
@@ -35,7 +35,6 @@ def parse_args_to_config() -> AppConfig:
     parser.add_argument("--n_layers", type=int, default=cfg.model.n_layers)
     parser.add_argument("--n_heads", type=int, default=cfg.model.n_heads)
     parser.add_argument("--d_ff", type=int, default=cfg.model.d_ff)
-    parser.add_argument("--dropout", type=float, default=cfg.model.dropout)
     tie_group = parser.add_mutually_exclusive_group()
     tie_group.add_argument("--tie_embeddings", action="store_true", default=cfg.model.tie_embeddings)
     tie_group.add_argument("--no_tie_embeddings", action="store_false", dest="tie_embeddings")
@@ -48,18 +47,12 @@ def parse_args_to_config() -> AppConfig:
     parser.add_argument("--grad_clip", type=float, default=cfg.optim.grad_clip)
 
     # Schedule
-    parser.add_argument("--warmup_iters", type=int, default=cfg.schedule.warmup_iters)
-    parser.add_argument("--cosine_cycle_iters", type=int, default=cfg.schedule.cosine_cycle_iters)
-    parser.add_argument("--min_lr", type=float, default=cfg.schedule.min_lr)
-
     # Train
     parser.add_argument("--batch_size", type=int, default=cfg.train.batch_size)
-    parser.add_argument("--max_iters", type=int, default=cfg.train.max_iters)
     parser.add_argument("--eval_every", type=int, default=cfg.train.eval_every)
     parser.add_argument("--eval_iters", type=int, default=cfg.train.eval_iters)
     parser.add_argument("--log_every", type=int, default=cfg.train.log_every)
     parser.add_argument("--seed", type=int, default=cfg.train.seed)
-    parser.add_argument("--exp_name", default=cfg.train.experiment_name)
 
     # Checkpoint
     parser.add_argument("--ckpt_every", type=int, default=cfg.checkpoint.every)
@@ -73,8 +66,7 @@ def parse_args_to_config() -> AppConfig:
     args = parser.parse_args()
 
     # Apply CLI overrides to config
-    set_nested_attr(cfg, "data.train_data", args.train_data)
-    set_nested_attr(cfg, "data.val_data", args.val_data)
+    set_nested_attr(cfg, "data.dataset", args.dataset)
     set_nested_attr(cfg, "data.dtype", args.dtype)
     set_nested_attr(cfg, "data.device", args.device)
 
@@ -84,7 +76,6 @@ def parse_args_to_config() -> AppConfig:
     set_nested_attr(cfg, "model.n_layers", args.n_layers)
     set_nested_attr(cfg, "model.n_heads", args.n_heads)
     set_nested_attr(cfg, "model.d_ff", args.d_ff)
-    set_nested_attr(cfg, "model.dropout", args.dropout)
     set_nested_attr(cfg, "model.tie_embeddings", args.tie_embeddings)
 
     set_nested_attr(cfg, "optim.lr", args.lr)
@@ -93,17 +84,11 @@ def parse_args_to_config() -> AppConfig:
     set_nested_attr(cfg, "optim.eps", args.eps)
     set_nested_attr(cfg, "optim.grad_clip", args.grad_clip)
 
-    set_nested_attr(cfg, "schedule.warmup_iters", args.warmup_iters)
-    set_nested_attr(cfg, "schedule.cosine_cycle_iters", args.cosine_cycle_iters)
-    set_nested_attr(cfg, "schedule.min_lr", args.min_lr)
-
     set_nested_attr(cfg, "train.batch_size", args.batch_size)
-    set_nested_attr(cfg, "train.max_iters", args.max_iters)
     set_nested_attr(cfg, "train.eval_every", args.eval_every)
     set_nested_attr(cfg, "train.eval_iters", args.eval_iters)
     set_nested_attr(cfg, "train.log_every", args.log_every)
     set_nested_attr(cfg, "train.seed", args.seed)
-    set_nested_attr(cfg, "train.experiment_name", args.exp_name)
 
     set_nested_attr(cfg, "checkpoint.every", args.ckpt_every)
     set_nested_attr(cfg, "checkpoint.resume", args.resume)
@@ -111,6 +96,25 @@ def parse_args_to_config() -> AppConfig:
     set_nested_attr(cfg, "logging.use_wandb", args.use_wandb)
     set_nested_attr(cfg, "logging.wandb_project", args.wandb_project)
     set_nested_attr(cfg, "logging.wandb_run_name", args.wandb_run_name)
+
+    dataset_paths = {
+        "tinystories": ("dataset/tinystories-train.npy", "dataset/tinystories-valid.npy"),
+        "owt": ("dataset/owt-train.npy", "dataset/owt-valid.npy"),
+    }
+    train_data, val_data = dataset_paths[cfg.data.dataset]
+    set_nested_attr(cfg, "data.train_data", train_data)
+    set_nested_attr(cfg, "data.val_data", val_data)
+
+    total_tokens = 327_680_000
+    total_iters = int(total_tokens / (cfg.train.batch_size * cfg.model.context_length))
+    set_nested_attr(cfg, "train.max_iters", total_iters)
+    set_nested_attr(cfg, "schedule.warmup_iters", int(total_iters * 0.05))
+    set_nested_attr(cfg, "schedule.cosine_cycle_iters", total_iters)
+    set_nested_attr(cfg, "schedule.min_lr", cfg.optim.lr / 10)
+
+    lr_str = f"{cfg.optim.lr:.0e}".replace("e-0", "e-").replace("e+0", "e+")
+    exp_name = f"{cfg.data.dataset}_lr{lr_str}_batch_size{cfg.train.batch_size}"
+    set_nested_attr(cfg, "train.experiment_name", exp_name)
 
     return cfg
 
@@ -124,6 +128,7 @@ def print_config(cfg: AppConfig) -> None:
 
     config_table.add_row("Data.train_data", str(cfg.data.train_data))
     config_table.add_row("Data.val_data", str(cfg.data.val_data))
+    config_table.add_row("Data.dataset", str(cfg.data.dataset))
     config_table.add_row("Data.dtype", str(cfg.data.dtype))
     config_table.add_row("Data.device", str(cfg.data.device))
 
@@ -133,7 +138,6 @@ def print_config(cfg: AppConfig) -> None:
     config_table.add_row("Model.n_layers", str(cfg.model.n_layers))
     config_table.add_row("Model.n_heads", str(cfg.model.n_heads))
     config_table.add_row("Model.d_ff", str(cfg.model.d_ff))
-    config_table.add_row("Model.dropout", str(cfg.model.dropout))
     config_table.add_row("Model.tie_embeddings", str(cfg.model.tie_embeddings))
 
     config_table.add_row("Optim.lr", str(cfg.optim.lr))
@@ -220,11 +224,20 @@ def _checkpoint_paths(exp_name: str, step: int) -> tuple[Path, Path]:
     return step_path, latest_path, best_path
 
 
+def _write_run_config(exp_name: str, cfg: AppConfig) -> None:
+    run_dir = Path("checkpoints") / exp_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    config_path = run_dir / "config.json"
+    with config_path.open("w", encoding="utf-8") as handle:
+        json.dump(dataclasses.asdict(cfg), handle, indent=2, sort_keys=True)
+
+
 def main():
     cfg = parse_args_to_config()
     logger = get_logger(__name__)
     print_config(cfg)
     logger.info("Configuration printed via rich console.")
+    _write_run_config(cfg.train.experiment_name, cfg)
 
     if not cfg.data.train_data:
         logger.error("Missing --train_data path.")
