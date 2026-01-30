@@ -337,6 +337,30 @@ def main():
             save_checkpoint(model, optimizer, it, latest_path)
             logger.info("Saved checkpoint to %s", step_path)
 
+    final_it = cfg.train.max_iters
+    if val_data is not None:
+        final_val_loss = _estimate_loss(
+            model,
+            val_data,
+            cfg,
+            device,
+            eval_iters=cfg.train.eval_iters,
+        )
+        logger.info("it=%d val_loss=%.4f (final)", final_it, final_val_loss)
+        if use_wandb:
+            wandb.log({"val/loss": final_val_loss}, step=final_it)
+        if final_val_loss < best_val_loss:
+            best_val_loss = final_val_loss
+            _, _, best_path = _checkpoint_paths(cfg.train.experiment_name, final_it)
+            save_checkpoint(model, optimizer, final_it, best_path)
+            logger.info("Saved best checkpoint to %s", best_path)
+
+    if cfg.checkpoint.every > 0:
+        step_path, latest_path, _ = _checkpoint_paths(cfg.train.experiment_name, final_it)
+        save_checkpoint(model, optimizer, final_it, step_path)
+        save_checkpoint(model, optimizer, final_it, latest_path)
+        logger.info("Saved final checkpoint to %s", step_path)
+
     logger.info("Training complete.")
 
 if __name__ == "__main__":
