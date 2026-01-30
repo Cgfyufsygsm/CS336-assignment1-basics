@@ -48,7 +48,7 @@ class TrainConfig:
     eval_iters: int = 100
     log_every: int = 50
     seed: int = 42
-    ablation_name: str = ""
+    ablation_name: str = "ablation_silu"
     experiment_name: str = "toy_tinystories"
 
 
@@ -60,7 +60,7 @@ class CheckpointConfig:
 
 @dataclass
 class LoggingConfig:
-    use_wandb: bool = False
+    use_wandb: bool = True
     wandb_project: str = "cs336_lab1"
     wandb_run_name: str = ""
 
