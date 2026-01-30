@@ -48,6 +48,7 @@ class TrainConfig:
     eval_iters: int = 100
     log_every: int = 50
     seed: int = 42
+    ablation_name: str = ""
     experiment_name: str = "toy_tinystories"
 
 

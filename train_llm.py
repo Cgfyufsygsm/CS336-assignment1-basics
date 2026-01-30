@@ -53,6 +53,7 @@ def parse_args_to_config() -> AppConfig:
     parser.add_argument("--eval_iters", type=int, default=cfg.train.eval_iters)
     parser.add_argument("--log_every", type=int, default=cfg.train.log_every)
     parser.add_argument("--seed", type=int, default=cfg.train.seed)
+    parser.add_argument("--ablation_name", default=cfg.train.ablation_name)
 
     # Checkpoint
     parser.add_argument("--ckpt_every", type=int, default=cfg.checkpoint.every)
@@ -89,6 +90,7 @@ def parse_args_to_config() -> AppConfig:
     set_nested_attr(cfg, "train.eval_iters", args.eval_iters)
     set_nested_attr(cfg, "train.log_every", args.log_every)
     set_nested_attr(cfg, "train.seed", args.seed)
+    set_nested_attr(cfg, "train.ablation_name", args.ablation_name)
 
     set_nested_attr(cfg, "checkpoint.every", args.ckpt_every)
     set_nested_attr(cfg, "checkpoint.resume", args.resume)
@@ -114,6 +116,9 @@ def parse_args_to_config() -> AppConfig:
 
     lr_str = f"{cfg.optim.lr:.0e}".replace("e-0", "e-").replace("e+0", "e+")
     exp_name = f"{cfg.data.dataset}_lr{lr_str}_batch_size{cfg.train.batch_size}"
+    ablation_name = cfg.train.ablation_name.strip()
+    if ablation_name:
+        exp_name = f"{ablation_name}_{exp_name}"
     set_nested_attr(cfg, "train.experiment_name", exp_name)
 
     return cfg
@@ -156,6 +161,7 @@ def print_config(cfg: AppConfig) -> None:
     config_table.add_row("Train.eval_iters", str(cfg.train.eval_iters))
     config_table.add_row("Train.log_every", str(cfg.train.log_every))
     config_table.add_row("Train.seed", str(cfg.train.seed))
+    config_table.add_row("Train.ablation_name", str(cfg.train.ablation_name))
     config_table.add_row("Train.experiment_name", str(cfg.train.experiment_name))
 
     config_table.add_row("Checkpoint.run_dir", f"{ckpt_root}/{cfg.train.experiment_name}")
