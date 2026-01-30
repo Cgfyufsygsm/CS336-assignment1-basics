@@ -3,7 +3,6 @@ import torch.nn as nn
 
 from cs336_basics.nn.attention import MultiheadSelfAttention
 from cs336_basics.nn.layers import Embedding, Linear, RMSNorm
-from cs336_basics.nn.layers import RotaryPositionalEmbedding
 from cs336_basics.nn.network import SwiGLU
 from cs336_basics.nn.decoding import generate_tokens
 from cs336_basics.nn.util import softmax
@@ -17,8 +16,7 @@ class TransformerBlock(nn.Module):
         """
         super().__init__()
         self.norm1 = RMSNorm(d_model)
-        rope = RotaryPositionalEmbedding(theta, d_model // num_heads, max_seq_len=max_seq_len)
-        self.attn = MultiheadSelfAttention(d_model, num_heads, rope)
+        self.attn = MultiheadSelfAttention(d_model, num_heads, rope=None)
         self.norm2 = RMSNorm(d_model)
         self.ffn = SwiGLU(d_model, d_ff)
 
