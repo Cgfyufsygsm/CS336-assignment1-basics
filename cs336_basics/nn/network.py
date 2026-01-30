@@ -16,9 +16,6 @@ class SwiGLU(nn.Module):
         self.d_ff = d_ff
         self.linear1 = Linear(d_model, d_ff, device=device, dtype=dtype)
         self.linear2 = Linear(d_ff, d_model, device=device, dtype=dtype)
-        self.linear3 = Linear(d_model, d_ff, device=device, dtype=dtype)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        gate = SiLU(self.linear1(x))
-        value = self.linear3(x)
-        return self.linear2(gate * value)
+        return self.linear2(SiLU(self.linear1(x)))

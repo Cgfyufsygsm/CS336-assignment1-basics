@@ -20,7 +20,7 @@ class ModelConfig:
     d_model: int = 512
     n_layers: int = 4   
     n_heads: int = 16
-    d_ff: int = 1344
+    d_ff: int = 2048
     tie_embeddings: bool = False
 
 
